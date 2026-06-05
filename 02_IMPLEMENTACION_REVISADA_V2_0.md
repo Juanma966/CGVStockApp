@@ -1,28 +1,25 @@
-# 💻 GUÍA DE IMPLEMENTACIÓN CQRS + MediatR
-## CGVStockApp - Ejemplos Prácticos Paso a Paso
+# 💻 IMPLEMENTACIÓN PRÁCTICA V2.0
+## CGVStockApp - Código Listo para Copiar (Sin Repository Pattern)
 
 ---
 
 ## 📋 ÍNDICE
+
 1. [Setup Inicial](#setup-inicial)
-2. [Crear una Feature Completa](#crear-feature-completa)
-3. [Ejemplo: Product Feature](#ejemplo-product-feature)
-4. [Ejemplo: Sale Feature](#ejemplo-sale-feature)
-5. [Ejemplo: Dashboard Feature](#ejemplo-dashboard-feature)
-6. [Configuración Global](#configuración-global)
-7. [Testing](#testing)
+2. [IApplicationDbContext](#iapplicationdbcontext)
+3. [Entidades Domain](#entidades-domain)
+4. [DbContext + Configurations](#dbcontext--configurations)
+5. [Feature Product Completa](#feature-product-completa)
+6. [Feature Sale Completa](#feature-sale-completa)
+7. [Feature Dashboard](#feature-dashboard)
+8. [Configuración Global](#configuración-global)
+9. [Controllers](#controllers)
 
 ---
 
-## 🚀 SETUP INICIAL (DÍAS 1-3)
-
-### Paso 1: Crear Solución
+## 🚀 SETUP INICIAL (Día 1-3)
 
 ```powershell
-# Carpeta de trabajo
-mkdir C:\Users\YourUser\Desktop\CGVStockApp
-cd C:\Users\YourUser\Desktop\CGVStockApp
-
 # Crear solución
 dotnet new sln -n CGVStockApp
 
@@ -37,12 +34,9 @@ dotnet sln add CGVStockApp.Domain/CGVStockApp.Domain.csproj
 dotnet sln add CGVStockApp.Application/CGVStockApp.Application.csproj
 dotnet sln add CGVStockApp.Infrastructure/CGVStockApp.Infrastructure.csproj
 dotnet sln add CGVStockApp.Api/CGVStockApp.Api.csproj
-```
 
-### Paso 2: Instalar Dependencias
-
-```powershell
-# En Domain (solo Microsoft.Extensions para IEntity)
+# Instalar dependencias
+# En Domain
 cd CGVStockApp.Domain
 dotnet add package Microsoft.EntityFrameworkCore.Abstractions
 cd ..
@@ -52,8 +46,7 @@ cd CGVStockApp.Application
 dotnet add package MediatR
 dotnet add package MediatR.Extensions.Microsoft.DependencyInjection
 dotnet add package FluentValidation
-dotnet add package AutoMapper
-dotnet add package AutoMapper.Extensions.Microsoft.DependencyInjection
+dotnet add package AutoMapper  # Limitado, solo si necesario
 cd ..
 
 # En Infrastructure
@@ -70,97 +63,116 @@ cd CGVStockApp.Api
 dotnet add package Microsoft.AspNetCore.Authentication.JwtBearer
 cd ..
 
-# Verificar build
-dotnet build
-```
-
-### Paso 3: Agregar referencias entre proyectos
-
-```powershell
-# Application depende de Domain
-cd CGVStockApp.Application
-dotnet add reference ../CGVStockApp.Domain/CGVStockApp.Domain.csproj
-cd ..
-
-# Infrastructure depende de Domain y Application
-cd CGVStockApp.Infrastructure
-dotnet add reference ../CGVStockApp.Domain/CGVStockApp.Domain.csproj
-dotnet add reference ../CGVStockApp.Application/CGVStockApp.Application.csproj
-cd ..
-
-# Api depende de Application
-cd CGVStockApp.Api
-dotnet add reference ../CGVStockApp.Application/CGVStockApp.Application.csproj
-cd ..
-
+# Verificar
 dotnet build
 ```
 
 ---
 
-## 📦 CREAR UNA FEATURE COMPLETA
+## 🔌 IApplicationDbContext
 
-### Anatomía de una Feature CQRS
+### Application/Common/Interfaces/IApplicationDbContext.cs
 
-```
-Features/
-├── YourFeature/
-│   ├── Commands/
-│   │   └── CreateYourEntityCommand.cs          # El "qué hacer"
-│   ├── Handlers/
-│   │   └── CreateYourEntityCommandHandler.cs   # El "cómo hacerlo"
-│   ├── Queries/
-│   │   └── GetYourEntitiesQuery.cs             # El "qué traer"
-│   ├── QueryHandlers/
-│   │   └── GetYourEntitiesQueryHandler.cs      # El "cómo traerlo"
-│   ├── DTOs/
-│   │   ├── CreateYourEntityRequest.cs          # Input
-│   │   └── YourEntityResponse.cs               # Output
-│   ├── Validators/
-│   │   └── CreateYourEntityValidator.cs        # Validaciones
-│   └── Mappings/
-│       └── YourEntityMappingProfile.cs         # Auto Mapper
+```csharp
+using Microsoft.EntityFrameworkCore;
+using CGVStockApp.Domain.Entities;
+
+namespace CGVStockApp.Application.Common.Interfaces
+{
+    /// <summary>
+    /// Interfaz que expone los DbSets disponibles en la aplicación.
+    /// Implementada por ApplicationDbContext en Infrastructure.
+    /// Los Handlers de CQRS inyectan esta interfaz para acceder a datos.
+    /// </summary>
+    public interface IApplicationDbContext
+    {
+        DbSet<User> Users { get; }
+        DbSet<Role> Roles { get; }
+        DbSet<Category> Categories { get; }
+        DbSet<Subcategory> Subcategories { get; }
+        DbSet<Product> Products { get; }
+        DbSet<Sale> Sales { get; }
+        DbSet<SaleDetail> SaleDetails { get; }
+        DbSet<StockMovement> StockMovements { get; }
+        DbSet<AccountingMovement> AccountingMovements { get; }
+        
+        /// <summary>
+        /// Persiste los cambios realizados al contexto en la base de datos.
+        /// </summary>
+        Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
+    }
+}
 ```
 
 ---
 
-## 🎯 EJEMPLO: PRODUCT FEATURE (COMPLETO)
+## 📦 ENTIDADES DOMAIN
 
-### 1. Domain/Entities/Product.cs
+### Domain/Entities/Product.cs
 
 ```csharp
 using CGVStockApp.Domain.Common;
 
 namespace CGVStockApp.Domain.Entities
 {
+    /// <summary>
+    /// Representa un producto en el sistema.
+    /// Contiene lógica de dominio que valida el estado del producto.
+    /// </summary>
     public class Product : AuditableEntity, IAggregateRoot
     {
         public int Id { get; set; }
-        public string ProductCode { get; set; } // Formato AANNNN
+        
+        /// <summary>
+        /// Código único del producto. Formato: AANNNN
+        /// Ejemplo: FL0001 (Frutas - Limones - 0001)
+        /// </summary>
+        public string ProductCode { get; set; }
+        
         public string Name { get; set; }
         public string Description { get; set; }
         public decimal PublicPrice { get; set; }
         public decimal WholesalePrice { get; set; }
+        
+        /// <summary>
+        /// Stock inicial (histórico, no cambia).
+        /// </summary>
         public int InitialStock { get; set; }
+        
+        /// <summary>
+        /// Stock disponible (se actualiza con cada venta).
+        /// Fórmula: AvailableStock = InitialStock - QuantitySold
+        /// </summary>
         public int AvailableStock { get; set; }
+        
+        /// <summary>
+        /// Umbral de alerta para stock mínimo.
+        /// Si AvailableStock <= AlertStock, aparece en reporte.
+        /// </summary>
         public int AlertStock { get; set; }
         
-        // Foreign Keys
         public int? CategoryId { get; set; }
         public Category Category { get; set; }
         
         public int? SubcategoryId { get; set; }
         public Subcategory Subcategory { get; set; }
         
-        // Navigation
         public ICollection<SaleDetail> SaleDetails { get; set; } = new List<SaleDetail>();
         public ICollection<StockMovement> StockMovements { get; set; } = new List<StockMovement>();
         
         public bool IsActive { get; set; } = true;
         
-        // Lógica de dominio
+        // ========== LÓGICA DE DOMINIO ==========
+        
+        /// <summary>
+        /// Reduce el stock disponible.
+        /// Lanza excepción si no hay stock suficiente.
+        /// </summary>
         public void DecreaseStock(int quantity)
         {
+            if (quantity <= 0)
+                throw new InvalidOperationException("La cantidad debe ser mayor a 0");
+            
             if (quantity > AvailableStock)
                 throw new InvalidOperationException(
                     $"Stock insuficiente. Disponible: {AvailableStock}, solicitado: {quantity}");
@@ -168,9 +180,16 @@ namespace CGVStockApp.Domain.Entities
             AvailableStock -= quantity;
         }
         
-        public void UpdatePrices(decimal pricePercentageChange)
+        /// <summary>
+        /// Aplica un cambio de precio porcentual.
+        /// Ejemplo: percentageChange = 15 → +15%, = -10 → -10%
+        /// </summary>
+        public void UpdatePrices(decimal percentageChange)
         {
-            decimal factor = 1 + (pricePercentageChange / 100m);
+            if (percentageChange < -100)
+                throw new InvalidOperationException("No se puede reducir más del 100%");
+            
+            decimal factor = 1 + (percentageChange / 100m);
             PublicPrice = Math.Round(PublicPrice * factor, 2);
             WholesalePrice = Math.Round(WholesalePrice * factor, 2);
         }
@@ -178,70 +197,176 @@ namespace CGVStockApp.Domain.Entities
 }
 ```
 
-### 2. Domain/Common/AuditableEntity.cs
+### Domain/Entities/Sale.cs
 
 ```csharp
-namespace CGVStockApp.Domain.Common
+using CGVStockApp.Domain.Common;
+using CGVStockApp.Domain.Enums;
+
+namespace CGVStockApp.Domain.Entities
 {
-    public abstract class AuditableEntity
+    public class Sale : AuditableEntity, IAggregateRoot
     {
-        public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
-        public string CreatedBy { get; set; }
-        public DateTime? ModifiedAt { get; set; }
-        public string ModifiedBy { get; set; }
+        public int Id { get; set; }
+        public int UserId { get; set; }
+        public User User { get; set; }
+        
+        public CustomerType CustomerType { get; set; }  // Individual o Wholesale
+        public PaymentMethodType PaymentMethod { get; set; }  // Efectivo, Tarjeta, Transferencia
+        public decimal Total { get; set; }
+        public DateTime SaleDate { get; set; } = DateTime.UtcNow;
+        
+        public ICollection<SaleDetail> Details { get; set; } = new List<SaleDetail>();
+        
+        public void CalculateTotal()
+        {
+            Total = Details.Sum(d => d.Subtotal);
+        }
+        
+        public decimal GetAppliedPrice(Product product)
+        {
+            return CustomerType == CustomerType.Wholesale
+                ? product.WholesalePrice
+                : product.PublicPrice;
+        }
     }
 }
 ```
 
-### 3. Domain/Common/IAggregateRoot.cs
+### Domain/Entities/AccountingMovement.cs
 
 ```csharp
-namespace CGVStockApp.Domain.Common
+using CGVStockApp.Domain.Common;
+using CGVStockApp.Domain.Enums;
+
+namespace CGVStockApp.Domain.Entities
 {
-    public interface IAggregateRoot { }
+    /// <summary>
+    /// Representa un movimiento en el libro diario (contabilidad).
+    /// Se crea automáticamente cuando ocurren eventos: Venta, Compra, Gasto.
+    /// </summary>
+    public class AccountingMovement : AuditableEntity
+    {
+        public int Id { get; set; }
+        public DateTime MovementDate { get; set; }
+        public AccountingMovementType Type { get; set; }  // Sale, Purchase, Expense
+        public string Description { get; set; }
+        public decimal Amount { get; set; }
+        
+        /// <summary>
+        /// true = Entrada (ingresos), false = Salida (egresos)
+        /// </summary>
+        public bool IsIncome { get; set; }
+        
+        public int? SaleId { get; set; }
+        public Sale Sale { get; set; }
+        
+        public int UserId { get; set; }
+        public User User { get; set; }
+    }
 }
 ```
 
-### 4. Infrastructure/Persistence/Context/StockAppDbContext.cs
+### Domain/Enums/
+
+```csharp
+// Domain/Enums/AccountingMovementType.cs
+namespace CGVStockApp.Domain.Enums
+{
+    public enum AccountingMovementType
+    {
+        Sale = 1,
+        Purchase = 2,
+        Expense = 3
+    }
+}
+
+// Domain/Enums/CustomerType.cs
+namespace CGVStockApp.Domain.Enums
+{
+    public enum CustomerType
+    {
+        Individual = 1,
+        Wholesale = 2
+    }
+}
+
+// Domain/Enums/PaymentMethodType.cs
+namespace CGVStockApp.Domain.Enums
+{
+    public enum PaymentMethodType
+    {
+        Cash = 1,
+        Card = 2,
+        Transfer = 3
+    }
+}
+
+// Domain/Enums/RoleType.cs
+namespace CGVStockApp.Domain.Enums
+{
+    public enum RoleType
+    {
+        Admin = 1,
+        Seller = 2
+    }
+}
+```
+
+---
+
+## 💾 DbContext + Configurations
+
+### Infrastructure/Persistence/Context/ApplicationDbContext.cs
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
+using CGVStockApp.Application.Common.Interfaces;
 using CGVStockApp.Domain.Entities;
 using CGVStockApp.Infrastructure.Persistence.Configurations;
 
 namespace CGVStockApp.Infrastructure.Persistence.Context
 {
-    public class StockAppDbContext : DbContext
+    /// <summary>
+    /// DbContext principal de la aplicación.
+    /// Implementa IApplicationDbContext para que los Handlers puedan acceder.
+    /// </summary>
+    public class ApplicationDbContext : DbContext, IApplicationDbContext
     {
-        public StockAppDbContext(DbContextOptions<StockAppDbContext> options)
-            : base(options) { }
+        public ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
+            : base(options)
+        {
+        }
         
-        public DbSet<Product> Products { get; set; }
+        public DbSet<User> Users { get; set; }
+        public DbSet<Role> Roles { get; set; }
         public DbSet<Category> Categories { get; set; }
         public DbSet<Subcategory> Subcategories { get; set; }
+        public DbSet<Product> Products { get; set; }
         public DbSet<Sale> Sales { get; set; }
         public DbSet<SaleDetail> SaleDetails { get; set; }
         public DbSet<StockMovement> StockMovements { get; set; }
-        public DbSet<User> Users { get; set; }
-        public DbSet<Role> Roles { get; set; }
+        public DbSet<AccountingMovement> AccountingMovements { get; set; }
         
         protected override void OnModelCreating(ModelBuilder modelBuilder)
         {
             base.OnModelCreating(modelBuilder);
             
             // Aplicar todas las configuraciones
+            modelBuilder.ApplyConfiguration(new UserConfiguration());
+            modelBuilder.ApplyConfiguration(new RoleConfiguration());
             modelBuilder.ApplyConfiguration(new ProductConfiguration());
             modelBuilder.ApplyConfiguration(new CategoryConfiguration());
             modelBuilder.ApplyConfiguration(new SubcategoryConfiguration());
             modelBuilder.ApplyConfiguration(new SaleConfiguration());
             modelBuilder.ApplyConfiguration(new SaleDetailConfiguration());
-            modelBuilder.ApplyConfiguration(new UserConfiguration());
+            modelBuilder.ApplyConfiguration(new AccountingMovementConfiguration());
         }
     }
 }
 ```
 
-### 5. Infrastructure/Persistence/Configurations/ProductConfiguration.cs
+### Infrastructure/Persistence/Configurations/ProductConfiguration.cs
 
 ```csharp
 using Microsoft.EntityFrameworkCore;
@@ -257,11 +382,12 @@ namespace CGVStockApp.Infrastructure.Persistence.Configurations
             builder.ToTable("products");
             builder.HasKey(p => p.Id);
             
-            // Propiedades
             builder.Property(p => p.ProductCode)
                 .IsRequired()
                 .HasMaxLength(10)
                 .HasColumnName("product_code");
+            
+            builder.HasIndex(p => p.ProductCode).IsUnique();  // ✅ UNIQUE CONSTRAINT
             
             builder.Property(p => p.Name)
                 .IsRequired()
@@ -318,8 +444,7 @@ namespace CGVStockApp.Infrastructure.Persistence.Configurations
                 .HasForeignKey(p => p.SubcategoryId)
                 .OnDelete(DeleteBehavior.SetNull);
             
-            // Índices
-            builder.HasIndex(p => p.ProductCode).IsUnique();
+            // Índices para búsqueda
             builder.HasIndex(p => p.Name);
             builder.HasIndex(p => p.CategoryId);
         }
@@ -327,50 +452,45 @@ namespace CGVStockApp.Infrastructure.Persistence.Configurations
 }
 ```
 
-### 6. Application/Features/Products/DTOs/CreateProductRequest.cs
+---
+
+## 🎯 FEATURE PRODUCT COMPLETA
+
+### Application/Features/Products/DTOs/
 
 ```csharp
-namespace CGVStockApp.Application.Features.Products.DTOs
+// CreateProductRequest.cs
+public class CreateProductRequest
 {
-    public class CreateProductRequest
-    {
-        public string Name { get; set; }
-        public string Description { get; set; }
-        public decimal PublicPrice { get; set; }
-        public decimal WholesalePrice { get; set; }
-        public int InitialStock { get; set; }
-        public int AlertStock { get; set; }
-        public int? CategoryId { get; set; }
-        public int? SubcategoryId { get; set; }
-    }
+    public string Name { get; set; }
+    public string Description { get; set; }
+    public decimal PublicPrice { get; set; }
+    public decimal WholesalePrice { get; set; }
+    public int InitialStock { get; set; }
+    public int AlertStock { get; set; }
+    public int? CategoryId { get; set; }
+    public int? SubcategoryId { get; set; }
+}
+
+// ProductResponse.cs
+public class ProductResponse
+{
+    public int Id { get; set; }
+    public string ProductCode { get; set; }
+    public string Name { get; set; }
+    public string Description { get; set; }
+    public decimal PublicPrice { get; set; }
+    public decimal WholesalePrice { get; set; }
+    public int InitialStock { get; set; }
+    public int AvailableStock { get; set; }
+    public int AlertStock { get; set; }
+    public string CategoryName { get; set; }
+    public string SubcategoryName { get; set; }
+    public bool IsActive { get; set; }
 }
 ```
 
-### 7. Application/Features/Products/DTOs/ProductResponse.cs
-
-```csharp
-namespace CGVStockApp.Application.Features.Products.DTOs
-{
-    public class ProductResponse
-    {
-        public int Id { get; set; }
-        public string ProductCode { get; set; }
-        public string Name { get; set; }
-        public string Description { get; set; }
-        public decimal PublicPrice { get; set; }
-        public decimal WholesalePrice { get; set; }
-        public int InitialStock { get; set; }
-        public int AvailableStock { get; set; }
-        public int AlertStock { get; set; }
-        public string CategoryName { get; set; }
-        public string SubcategoryName { get; set; }
-        public bool IsActive { get; set; }
-        public DateTime CreatedAt { get; set; }
-    }
-}
-```
-
-### 8. Application/Features/Products/Commands/CreateProductCommand.cs
+### Application/Features/Products/Commands/CreateProductCommand.cs
 
 ```csharp
 using MediatR;
@@ -392,7 +512,7 @@ namespace CGVStockApp.Application.Features.Products.Commands
 }
 ```
 
-### 9. Application/Features/Products/Validators/CreateProductCommandValidator.cs
+### Application/Features/Products/Validators/CreateProductCommandValidator.cs
 
 ```csharp
 using FluentValidation;
@@ -405,7 +525,7 @@ namespace CGVStockApp.Application.Features.Products.Validators
         public CreateProductCommandValidator()
         {
             RuleFor(x => x.Name)
-                .NotEmpty().WithMessage("El nombre del producto es requerido")
+                .NotEmpty().WithMessage("El nombre es requerido")
                 .MaximumLength(150).WithMessage("El nombre no puede exceder 150 caracteres");
             
             RuleFor(x => x.PublicPrice)
@@ -418,34 +538,34 @@ namespace CGVStockApp.Application.Features.Products.Validators
                 .GreaterThanOrEqualTo(0).WithMessage("El stock inicial no puede ser negativo");
             
             RuleFor(x => x.AlertStock)
-                .GreaterThanOrEqualTo(0).WithMessage("El stock de alerta no puede ser negativo")
+                .GreaterThanOrEqualTo(0)
                 .LessThanOrEqualTo(x => x.InitialStock)
-                .WithMessage("El stock de alerta no puede ser mayor que el stock inicial");
+                .WithMessage("El stock de alerta debe ser mayor a 0 y menor o igual al stock inicial");
         }
     }
 }
 ```
 
-### 10. Application/Features/Products/Handlers/CreateProductCommandHandler.cs
+### Application/Features/Products/Handlers/CreateProductCommandHandler.cs
 
 ```csharp
 using MediatR;
 using AutoMapper;
+using CGVStockApp.Application.Common.Interfaces;
 using CGVStockApp.Application.Features.Products.Commands;
 using CGVStockApp.Application.Features.Products.DTOs;
 using CGVStockApp.Domain.Entities;
-using CGVStockApp.Infrastructure.Persistence.Context;
 
 namespace CGVStockApp.Application.Features.Products.Handlers
 {
     public class CreateProductCommandHandler 
         : IRequestHandler<CreateProductCommand, ProductResponse>
     {
-        private readonly StockAppDbContext _context;
-        private readonly IMapper _mapper;
+        private readonly IApplicationDbContext _context;  // ✅ Inyectado directamente
+        private readonly IMapper _mapper;                 // ✅ Solo si necesario
         
         public CreateProductCommandHandler(
-            StockAppDbContext context,
+            IApplicationDbContext context,
             IMapper mapper)
         {
             _context = context;
@@ -477,21 +597,54 @@ namespace CGVStockApp.Application.Features.Products.Handlers
             }
             
             // Generar ProductCode (AANNNN)
-            string categoryLetter = "P"; // Por defecto
+            string productCode = await GenerateProductCode(request.CategoryId, request.SubcategoryId, cancellationToken);
+            
+            // MAPEAR con AutoMapper (solo porque hay lógica de transformación)
+            var product = _mapper.Map<Product>(request);
+            product.ProductCode = productCode;
+            product.AvailableStock = request.InitialStock;
+            
+            // PERSISTIR con DbContext DIRECTO (sin Repository)
+            _context.Products.Add(product);
+            await _context.SaveChangesAsync(cancellationToken);
+            
+            // RETORNAR sin AutoMapper (manual)
+            return new ProductResponse
+            {
+                Id = product.Id,
+                ProductCode = product.ProductCode,
+                Name = product.Name,
+                Description = product.Description,
+                PublicPrice = product.PublicPrice,
+                WholesalePrice = product.WholesalePrice,
+                InitialStock = product.InitialStock,
+                AvailableStock = product.AvailableStock,
+                AlertStock = product.AlertStock
+            };
+        }
+        
+        private async Task<string> GenerateProductCode(
+            int? categoryId,
+            int? subcategoryId,
+            CancellationToken cancellationToken)
+        {
+            string categoryLetter = "P";
             string subcategoryLetter = "0";
             
-            if (request.CategoryId.HasValue)
+            if (categoryId.HasValue)
             {
                 var category = await _context.Categories
-                    .FindAsync(new object[] { request.CategoryId.Value }, cancellationToken: cancellationToken);
-                categoryLetter = category?.Name?.FirstOrDefault().ToString().ToUpper() ?? "P";
+                    .FindAsync(new object[] { categoryId.Value }, cancellationToken: cancellationToken);
+                if (category != null)
+                    categoryLetter = category.Name[0].ToString().ToUpper();
             }
             
-            if (request.SubcategoryId.HasValue)
+            if (subcategoryId.HasValue)
             {
                 var subcategory = await _context.Subcategories
-                    .FindAsync(new object[] { request.SubcategoryId.Value }, cancellationToken: cancellationToken);
-                subcategoryLetter = subcategory?.Name?.FirstOrDefault().ToString().ToUpper() ?? "0";
+                    .FindAsync(new object[] { subcategoryId.Value }, cancellationToken: cancellationToken);
+                if (subcategory != null)
+                    subcategoryLetter = subcategory.Name[0].ToString().ToUpper();
             }
             
             // Obtener próximo número
@@ -501,42 +654,16 @@ namespace CGVStockApp.Application.Features.Products.Handlers
                 .FirstOrDefault();
             
             int nextNumber = 1;
-            if (lastProduct != null)
-            {
-                var lastNumber = int.Parse(lastProduct.ProductCode.Substring(2));
-                nextNumber = lastNumber + 1;
-            }
+            if (lastProduct != null && int.TryParse(lastProduct.ProductCode.Substring(2), out var num))
+                nextNumber = num + 1;
             
-            string productCode = $"{categoryLetter}{subcategoryLetter}{nextNumber:D4}";
-            
-            // Crear entidad
-            var product = new Product
-            {
-                ProductCode = productCode,
-                Name = request.Name,
-                Description = request.Description,
-                PublicPrice = request.PublicPrice,
-                WholesalePrice = request.WholesalePrice,
-                InitialStock = request.InitialStock,
-                AvailableStock = request.InitialStock,
-                AlertStock = request.AlertStock,
-                CategoryId = request.CategoryId,
-                SubcategoryId = request.SubcategoryId,
-                IsActive = true
-            };
-            
-            // Persistir
-            _context.Products.Add(product);
-            await _context.SaveChangesAsync(cancellationToken);
-            
-            // Mapear y retornar
-            return _mapper.Map<ProductResponse>(product);
+            return $"{categoryLetter}{subcategoryLetter}{nextNumber:D4}";
         }
     }
 }
 ```
 
-### 11. Application/Features/Products/Queries/GetProductsQuery.cs
+### Application/Features/Products/Queries/GetProductsQuery.cs
 
 ```csharp
 using MediatR;
@@ -553,63 +680,61 @@ namespace CGVStockApp.Application.Features.Products.Queries
 }
 ```
 
-### 12. Application/Features/Products/QueryHandlers/GetProductsQueryHandler.cs
+### Application/Features/Products/Handlers/GetProductsQueryHandler.cs
 
 ```csharp
 using MediatR;
-using AutoMapper;
 using Microsoft.EntityFrameworkCore;
+using CGVStockApp.Application.Common.Interfaces;
 using CGVStockApp.Application.Features.Products.Queries;
 using CGVStockApp.Application.Features.Products.DTOs;
-using CGVStockApp.Infrastructure.Persistence.Context;
 
 namespace CGVStockApp.Application.Features.Products.QueryHandlers
 {
     public class GetProductsQueryHandler 
         : IRequestHandler<GetProductsQuery, List<ProductResponse>>
     {
-        private readonly StockAppDbContext _context;
-        private readonly IMapper _mapper;
+        private readonly IApplicationDbContext _context;  // ✅ Inyectado
         
-        public GetProductsQueryHandler(
-            StockAppDbContext context,
-            IMapper mapper)
+        public GetProductsQueryHandler(IApplicationDbContext context)
         {
             _context = context;
-            _mapper = mapper;
         }
         
         public async Task<List<ProductResponse>> Handle(
             GetProductsQuery request,
             CancellationToken cancellationToken)
         {
-            var query = _context.Products
-                .Include(p => p.Category)
-                .Include(p => p.Subcategory)
-                .AsQueryable();
-            
-            if (request.OnlyActive)
-                query = query.Where(p => p.IsActive);
-            
-            if (request.CategoryId.HasValue)
-                query = query.Where(p => p.CategoryId == request.CategoryId);
-            
-            if (request.SubcategoryId.HasValue)
-                query = query.Where(p => p.SubcategoryId == request.SubcategoryId);
-            
-            var products = await query
-                .OrderBy(p => p.Category.Name)
-                .ThenBy(p => p.Subcategory.Name)
+            // SIN AutoMapper - Select() directo a DTO
+            return await _context.Products
+                .Where(p => !request.OnlyActive || p.IsActive)
+                .Where(p => !request.CategoryId.HasValue || p.CategoryId == request.CategoryId)
+                .Where(p => !request.SubcategoryId.HasValue || p.SubcategoryId == request.SubcategoryId)
+                .Select(p => new ProductResponse
+                {
+                    Id = p.Id,
+                    ProductCode = p.ProductCode,
+                    Name = p.Name,
+                    Description = p.Description,
+                    PublicPrice = p.PublicPrice,
+                    WholesalePrice = p.WholesalePrice,
+                    InitialStock = p.InitialStock,
+                    AvailableStock = p.AvailableStock,
+                    AlertStock = p.AlertStock,
+                    CategoryName = p.Category.Name,
+                    SubcategoryName = p.Subcategory.Name,
+                    IsActive = p.IsActive
+                })
+                .OrderBy(p => p.CategoryName)
+                .ThenBy(p => p.SubcategoryName)
                 .ThenBy(p => p.Name)
                 .ToListAsync(cancellationToken);
-            
-            return _mapper.Map<List<ProductResponse>>(products);
         }
     }
 }
 ```
 
-### 13. Application/Features/Products/Queries/GetMinimumStockProductsQuery.cs
+### Application/Features/Products/Queries/GetMinimumStockProductsQuery.cs
 
 ```csharp
 using MediatR;
@@ -623,80 +748,497 @@ namespace CGVStockApp.Application.Features.Products.Queries
 }
 ```
 
-### 14. Application/Features/Products/QueryHandlers/GetMinimumStockProductsQueryHandler.cs
+### Application/Features/Products/Handlers/GetMinimumStockProductsQueryHandler.cs
 
 ```csharp
 using MediatR;
-using AutoMapper;
 using Microsoft.EntityFrameworkCore;
+using CGVStockApp.Application.Common.Interfaces;
 using CGVStockApp.Application.Features.Products.Queries;
 using CGVStockApp.Application.Features.Products.DTOs;
-using CGVStockApp.Infrastructure.Persistence.Context;
 
 namespace CGVStockApp.Application.Features.Products.QueryHandlers
 {
     public class GetMinimumStockProductsQueryHandler 
         : IRequestHandler<GetMinimumStockProductsQuery, List<ProductResponse>>
     {
-        private readonly StockAppDbContext _context;
-        private readonly IMapper _mapper;
+        private readonly IApplicationDbContext _context;
         
-        public GetMinimumStockProductsQueryHandler(
-            StockAppDbContext context,
-            IMapper mapper)
+        public GetMinimumStockProductsQueryHandler(IApplicationDbContext context)
         {
             _context = context;
-            _mapper = mapper;
         }
         
         public async Task<List<ProductResponse>> Handle(
             GetMinimumStockProductsQuery request,
             CancellationToken cancellationToken)
         {
-            var products = await _context.Products
-                .Include(p => p.Category)
-                .Include(p => p.Subcategory)
+            return await _context.Products
                 .Where(p => p.AvailableStock <= p.AlertStock && p.IsActive)
-                .OrderBy(p => p.Category.Name)
-                .ThenBy(p => p.Subcategory.Name)
+                .Select(p => new ProductResponse
+                {
+                    Id = p.Id,
+                    ProductCode = p.ProductCode,
+                    Name = p.Name,
+                    AvailableStock = p.AvailableStock,
+                    AlertStock = p.AlertStock,
+                    CategoryName = p.Category.Name,
+                    SubcategoryName = p.Subcategory.Name
+                })
+                .OrderBy(p => p.CategoryName)
+                .ThenBy(p => p.SubcategoryName)
                 .ThenBy(p => p.Name)
                 .ToListAsync(cancellationToken);
-            
-            return _mapper.Map<List<ProductResponse>>(products);
         }
     }
 }
 ```
 
-### 15. Application/Features/Products/Mappings/ProductMappingProfile.cs
+### Application/Features/Products/Mappings/ProductMappingProfile.cs
 
 ```csharp
 using AutoMapper;
 using CGVStockApp.Application.Features.Products.Commands;
-using CGVStockApp.Application.Features.Products.DTOs;
 using CGVStockApp.Domain.Entities;
 
 namespace CGVStockApp.Application.Features.Products.Mappings
 {
+    /// <summary>
+    /// Mapeos para Products. 
+    /// NOTA: No mapeamos Product → ProductResponse aquí.
+    /// Usamos Select() directo en Queries para mejor performance.
+    /// </summary>
     public class ProductMappingProfile : Profile
     {
         public ProductMappingProfile()
         {
-            CreateMap<CreateProductCommand, Product>();
-            
-            CreateMap<CreateProductRequest, CreateProductCommand>();
-            
-            CreateMap<Product, ProductResponse>()
-                .ForMember(dest => dest.CategoryName, 
-                    opt => opt.MapFrom(src => src.Category.Name))
-                .ForMember(dest => dest.SubcategoryName, 
-                    opt => opt.MapFrom(src => src.Subcategory.Name));
+            // SOLO mapeos complejos (Command → Entity)
+            CreateMap<CreateProductCommand, Product>()
+                .ForMember(dest => dest.ProductCode, opt => opt.Ignore())
+                .ForMember(dest => dest.AvailableStock, 
+                    opt => opt.MapFrom(src => src.InitialStock));
         }
     }
 }
 ```
 
-### 16. Api/Controllers/ProductController.cs
+---
+
+## 💼 FEATURE SALE COMPLETA
+
+### Application/Features/Sales/Commands/CreateSaleCommand.cs
+
+```csharp
+using MediatR;
+using CGVStockApp.Application.Features.Sales.DTOs;
+using CGVStockApp.Domain.Enums;
+
+namespace CGVStockApp.Application.Features.Sales.Commands
+{
+    public class CreateSaleCommand : IRequest<SaleResponse>
+    {
+        public int UserId { get; set; }
+        public CustomerType CustomerType { get; set; }
+        public PaymentMethodType PaymentMethod { get; set; }
+        public List<SaleDetailRequest> Details { get; set; } = new();
+    }
+    
+    public class SaleDetailRequest
+    {
+        public int ProductId { get; set; }
+        public int Quantity { get; set; }
+    }
+}
+```
+
+### Application/Features/Sales/Handlers/CreateSaleCommandHandler.cs
+
+```csharp
+using MediatR;
+using CGVStockApp.Application.Common.Interfaces;
+using CGVStockApp.Application.Features.Sales.Commands;
+using CGVStockApp.Application.Features.Sales.DTOs;
+using CGVStockApp.Domain.Entities;
+using CGVStockApp.Domain.Enums;
+
+namespace CGVStockApp.Application.Features.Sales.Handlers
+{
+    public class CreateSaleCommandHandler 
+        : IRequestHandler<CreateSaleCommand, SaleResponse>
+    {
+        private readonly IApplicationDbContext _context;  // ✅ Directo
+        
+        public CreateSaleCommandHandler(IApplicationDbContext context)
+        {
+            _context = context;
+        }
+        
+        public async Task<SaleResponse> Handle(
+            CreateSaleCommand request,
+            CancellationToken cancellationToken)
+        {
+            // Validar usuario existe
+            var user = await _context.Users
+                .FindAsync(new object[] { request.UserId }, cancellationToken: cancellationToken);
+            
+            if (user == null)
+                throw new KeyNotFoundException("El usuario no existe");
+            
+            // Crear venta
+            var sale = new Sale
+            {
+                UserId = request.UserId,
+                CustomerType = request.CustomerType,
+                PaymentMethod = request.PaymentMethod
+            };
+            
+            // Procesar detalles
+            foreach (var detail in request.Details)
+            {
+                var product = await _context.Products
+                    .FindAsync(new object[] { detail.ProductId }, cancellationToken: cancellationToken);
+                
+                if (product == null)
+                    throw new KeyNotFoundException($"Producto {detail.ProductId} no existe");
+                
+                // Validar stock
+                if (product.AvailableStock < detail.Quantity)
+                    throw new InvalidOperationException(
+                        $"Stock insuficiente para {product.Name}. " +
+                        $"Disponible: {product.AvailableStock}, solicitado: {detail.Quantity}");
+                
+                // Obtener precio según tipo de cliente
+                var appliedPrice = sale.GetAppliedPrice(product);
+                
+                // Crear detalle
+                var saleDetail = new SaleDetail
+                {
+                    ProductId = product.Id,
+                    Quantity = detail.Quantity,
+                    UnitPrice = appliedPrice,
+                    Subtotal = appliedPrice * detail.Quantity
+                };
+                
+                sale.Details.Add(saleDetail);
+                
+                // Descontar stock (lógica de dominio)
+                product.DecreaseStock(detail.Quantity);
+                
+                // Registrar movimiento de stock
+                var movement = new StockMovement
+                {
+                    ProductId = product.Id,
+                    Type = StockMovementType.Sale,
+                    Quantity = -detail.Quantity,
+                    Reason = $"Venta #{sale.Id}"
+                };
+                
+                _context.StockMovements.Add(movement);
+            }
+            
+            // Calcular total
+            sale.CalculateTotal();
+            
+            // Registrar en libro diario (IMPORTANTE para Dashboard)
+            var accountingMovement = new AccountingMovement
+            {
+                MovementDate = sale.SaleDate,
+                Type = AccountingMovementType.Sale,
+                Description = $"Venta#{sale.Id}",
+                Amount = sale.Total,
+                IsIncome = true,  // Entrada
+                SaleId = sale.Id,
+                UserId = request.UserId
+            };
+            
+            _context.Sales.Add(sale);
+            _context.AccountingMovements.Add(accountingMovement);
+            await _context.SaveChangesAsync(cancellationToken);
+            
+            return new SaleResponse
+            {
+                Id = sale.Id,
+                UserId = sale.UserId,
+                CustomerType = sale.CustomerType.ToString(),
+                PaymentMethod = sale.PaymentMethod.ToString(),
+                Total = sale.Total,
+                SaleDate = sale.SaleDate,
+                Details = sale.Details.Select(d => new SaleDetailResponse
+                {
+                    ProductId = d.ProductId,
+                    Quantity = d.Quantity,
+                    UnitPrice = d.UnitPrice,
+                    Subtotal = d.Subtotal
+                }).ToList()
+            };
+        }
+    }
+}
+```
+
+---
+
+## 📊 FEATURE DASHBOARD
+
+### Application/Features/Dashboard/Queries/GetDailySalesQuery.cs
+
+```csharp
+using MediatR;
+using CGVStockApp.Application.Features.Dashboard.DTOs;
+
+namespace CGVStockApp.Application.Features.Dashboard.Queries
+{
+    public class GetDailySalesQuery : IRequest<DashboardResponse>
+    {
+        public DateTime Date { get; set; } = DateTime.Today;
+    }
+}
+```
+
+### Application/Features/Dashboard/Handlers/GetDailySalesQueryHandler.cs
+
+```csharp
+using MediatR;
+using Microsoft.EntityFrameworkCore;
+using CGVStockApp.Application.Common.Interfaces;
+using CGVStockApp.Application.Features.Dashboard.Queries;
+using CGVStockApp.Application.Features.Dashboard.DTOs;
+
+namespace CGVStockApp.Application.Features.Dashboard.QueryHandlers
+{
+    public class GetDailySalesQueryHandler 
+        : IRequestHandler<GetDailySalesQuery, DashboardResponse>
+    {
+        private readonly IApplicationDbContext _context;
+        
+        public GetDailySalesQueryHandler(IApplicationDbContext context)
+        {
+            _context = context;
+        }
+        
+        public async Task<DashboardResponse> Handle(
+            GetDailySalesQuery request,
+            CancellationToken cancellationToken)
+        {
+            var startOfDay = request.Date.Date;
+            var endOfDay = startOfDay.AddDays(1).AddTicks(-1);
+            
+            // SIN AutoMapper - Select() directo
+            var movements = await _context.AccountingMovements
+                .Where(m => m.MovementDate >= startOfDay && m.MovementDate <= endOfDay)
+                .Select(m => new MovementDto
+                {
+                    Date = m.MovementDate,
+                    Type = m.Type.ToString(),
+                    Description = m.Description,
+                    Amount = m.Amount,
+                    IsIncome = m.IsIncome
+                })
+                .ToListAsync(cancellationToken);
+            
+            var incomes = movements.Where(m => m.IsIncome).Sum(m => m.Amount);
+            var expenses = movements.Where(m => !m.IsIncome).Sum(m => m.Amount);
+            
+            return new DashboardResponse
+            {
+                Period = "Diario",
+                Date = request.Date,
+                TotalIncomes = incomes,
+                TotalExpenses = expenses,
+                Balance = incomes - expenses,
+                Movements = movements
+            };
+        }
+    }
+}
+```
+
+### Application/Features/Dashboard/DTOs/DashboardResponse.cs
+
+```csharp
+namespace CGVStockApp.Application.Features.Dashboard.DTOs
+{
+    public class DashboardResponse
+    {
+        public string Period { get; set; }
+        public DateTime Date { get; set; }
+        public decimal TotalIncomes { get; set; }
+        public decimal TotalExpenses { get; set; }
+        public decimal Balance { get; set; }
+        public List<MovementDto> Movements { get; set; }
+    }
+    
+    public class MovementDto
+    {
+        public DateTime Date { get; set; }
+        public string Type { get; set; }
+        public string Description { get; set; }
+        public decimal Amount { get; set; }
+        public bool IsIncome { get; set; }
+    }
+}
+```
+
+---
+
+## ⚙️ CONFIGURACIÓN GLOBAL
+
+### Application/DependencyInjection.cs
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using MediatR;
+using FluentValidation;
+using AutoMapper;
+using CGVStockApp.Application.Common.Behaviors;
+using CGVStockApp.Application.Features.Products.Mappings;
+
+namespace CGVStockApp.Application
+{
+    public static class DependencyInjection
+    {
+        public static IServiceCollection AddApplication(this IServiceCollection services)
+        {
+            // MediatR
+            services.AddMediatR(typeof(DependencyInjection).Assembly);
+            
+            // Pipeline Behaviors
+            services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
+            services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
+            
+            // FluentValidation
+            services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
+            
+            // AutoMapper (solo para los mappings que definimos)
+            services.AddAutoMapper(typeof(ProductMappingProfile).Assembly);
+            
+            return services;
+        }
+    }
+}
+```
+
+### Infrastructure/DependencyInjection.cs
+
+```csharp
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.EntityFrameworkCore;
+using CGVStockApp.Application.Common.Interfaces;
+using CGVStockApp.Infrastructure.Persistence.Context;
+using CGVStockApp.Infrastructure.Services;
+
+namespace CGVStockApp.Infrastructure
+{
+    public static class DependencyInjection
+    {
+        public static IServiceCollection AddInfrastructure(
+            this IServiceCollection services,
+            IConfiguration configuration)
+        {
+            // DbContext
+            var connectionString = configuration.GetConnectionString("DefaultConnection");
+            services.AddDbContext<ApplicationDbContext>(options =>
+                options.UseNpgsql(connectionString));
+            
+            // Registrar interfaz ✅ (IMPORTANTE: Sin Repository Pattern)
+            services.AddScoped<IApplicationDbContext>(provider =>
+                provider.GetRequiredService<ApplicationDbContext>());
+            
+            // Services
+            services.AddScoped<JwtTokenService>();
+            services.AddScoped<PasswordHashService>();
+            services.AddScoped<PdfGenerationService>();
+            
+            return services;
+        }
+    }
+}
+```
+
+### Api/Program.cs
+
+```csharp
+using CGVStockApp.Application;
+using CGVStockApp.Infrastructure;
+using CGVStockApp.Infrastructure.Persistence.Context;
+using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.IdentityModel.Tokens;
+using System.Text;
+
+var builder = WebApplicationBuilder.CreateBuilder(args);
+
+// Add services to DI
+builder.Services.AddApplication();
+builder.Services.AddInfrastructure(builder.Configuration);
+
+// Add controllers and Swagger
+builder.Services.AddControllers();
+builder.Services.AddEndpointsApiExplorer();
+builder.Services.AddSwaggerGen();
+
+// JWT Authentication
+var jwtSettings = builder.Configuration.GetSection("JwtSettings");
+var secretKey = jwtSettings["SecretKey"];
+
+builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
+    .AddJwtBearer(options =>
+    {
+        options.TokenValidationParameters = new TokenValidationParameters
+        {
+            ValidateIssuerSigningKey = true,
+            IssuerSigningKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(secretKey)),
+            ValidateIssuer = true,
+            ValidIssuer = "CGVStockApp",
+            ValidateAudience = true,
+            ValidAudience = "CGVStockAppClient",
+            ValidateLifetime = true
+        };
+    });
+
+builder.Services.AddAuthorization();
+
+// CORS
+builder.Services.AddCors(options =>
+{
+    options.AddPolicy("AllowReactApp", builder =>
+    {
+        builder.WithOrigins("http://localhost:3000")
+               .AllowAnyMethod()
+               .AllowAnyHeader();
+    });
+});
+
+var app = builder.Build();
+
+// Migrations y Seeding
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+    dbContext.Database.Migrate();
+    // Seeding...
+}
+
+if (app.Environment.IsDevelopment())
+{
+    app.UseSwagger();
+    app.UseSwaggerUI();
+}
+
+app.UseHttpsRedirection();
+app.UseCors("AllowReactApp");
+app.UseAuthentication();
+app.UseAuthorization();
+app.MapControllers();
+
+app.Run();
+```
+
+---
+
+## 🎮 CONTROLLERS
+
+### Api/Controllers/ProductController.cs
 
 ```csharp
 using MediatR;
@@ -737,7 +1279,7 @@ namespace CGVStockApp.Api.Controllers
             };
             
             var result = await _mediator.Send(command);
-            return CreatedAtAction(nameof(GetProductById), new { id = result.Id }, result);
+            return CreatedAtAction(nameof(GetById), new { id = result.Id }, result);
         }
         
         [HttpGet]
@@ -745,8 +1287,8 @@ namespace CGVStockApp.Api.Controllers
             [FromQuery] int? categoryId,
             [FromQuery] int? subcategoryId)
         {
-            var query = new GetProductsQuery
-            {
+            var query = new GetProductsQuery 
+            { 
                 CategoryId = categoryId,
                 SubcategoryId = subcategoryId
             };
@@ -755,250 +1297,20 @@ namespace CGVStockApp.Api.Controllers
             return Ok(result);
         }
         
-        [HttpGet("{id}")]
-        public async Task<IActionResult> GetProductById(int id)
-        {
-            // Implementar GetProductByIdQuery
-            return Ok();
-        }
-        
         [HttpGet("minimum-stock")]
         [Authorize(Roles = "Admin")]
-        public async Task<IActionResult> GetMinimumStockProducts()
+        public async Task<IActionResult> GetMinimumStock()
         {
             var query = new GetMinimumStockProductsQuery();
             var result = await _mediator.Send(query);
             return Ok(result);
         }
-    }
-}
-```
-
----
-
-## 💼 EJEMPLO: SALE FEATURE (MÁS COMPLEJA)
-
-### 1. Domain/Entities/Sale.cs
-
-```csharp
-using CGVStockApp.Domain.Common;
-using CGVStockApp.Domain.Enums;
-
-namespace CGVStockApp.Domain.Entities
-{
-    public class Sale : AuditableEntity, IAggregateRoot
-    {
-        public int Id { get; set; }
-        public int UserId { get; set; }
-        public User User { get; set; }
         
-        public CustomerType CustomerType { get; set; } // Final o Mayorista
-        public PaymentMethodType PaymentMethod { get; set; } // Efectivo, Tarjeta, Transferencia
-        public decimal Total { get; set; }
-        public DateTime SaleDate { get; set; } = DateTime.UtcNow;
-        
-        public ICollection<SaleDetail> Details { get; set; } = new List<SaleDetail>();
-        
-        // Lógica de dominio
-        public void CalculateTotal()
+        [HttpGet("{id}")]
+        public async Task<IActionResult> GetById(int id)
         {
-            Total = Details.Sum(d => d.Subtotal);
-        }
-        
-        public decimal GetAppliedPrice(Product product)
-        {
-            return CustomerType == CustomerType.Wholesale 
-                ? product.WholesalePrice 
-                : product.PublicPrice;
-        }
-    }
-}
-```
-
-### 2. Domain/Enums/CustomerType.cs
-
-```csharp
-namespace CGVStockApp.Domain.Enums
-{
-    public enum CustomerType
-    {
-        Individual = 1,
-        Wholesale = 2
-    }
-}
-```
-
-### 3. Application/Features/Sales/Commands/CreateSaleCommand.cs
-
-```csharp
-using MediatR;
-using CGVStockApp.Application.Features.Sales.DTOs;
-using CGVStockApp.Domain.Enums;
-
-namespace CGVStockApp.Application.Features.Sales.Commands
-{
-    public class CreateSaleCommand : IRequest<SaleResponse>
-    {
-        public int UserId { get; set; }
-        public CustomerType CustomerType { get; set; }
-        public PaymentMethodType PaymentMethod { get; set; }
-        public List<SaleDetailRequest> Details { get; set; } = new();
-    }
-    
-    public class SaleDetailRequest
-    {
-        public int ProductId { get; set; }
-        public int Quantity { get; set; }
-    }
-}
-```
-
-### 4. Application/Features/Sales/Validators/CreateSaleCommandValidator.cs
-
-```csharp
-using FluentValidation;
-using CGVStockApp.Application.Features.Sales.Commands;
-
-namespace CGVStockApp.Application.Features.Sales.Validators
-{
-    public class CreateSaleCommandValidator : AbstractValidator<CreateSaleCommand>
-    {
-        public CreateSaleCommandValidator()
-        {
-            RuleFor(x => x.UserId)
-                .GreaterThan(0).WithMessage("Usuario requerido");
-            
-            RuleFor(x => x.Details)
-                .NotEmpty().WithMessage("Debe agregar al menos un producto");
-            
-            RuleForEach(x => x.Details).SetValidator(new SaleDetailValidator());
-        }
-    }
-    
-    public class SaleDetailValidator : AbstractValidator<SaleDetailRequest>
-    {
-        public SaleDetailValidator()
-        {
-            RuleFor(x => x.ProductId)
-                .GreaterThan(0).WithMessage("Producto requerido");
-            
-            RuleFor(x => x.Quantity)
-                .GreaterThan(0).WithMessage("Cantidad debe ser mayor a 0");
-        }
-    }
-}
-```
-
-### 5. Application/Features/Sales/Handlers/CreateSaleCommandHandler.cs
-
-```csharp
-using MediatR;
-using AutoMapper;
-using Microsoft.EntityFrameworkCore;
-using CGVStockApp.Application.Features.Sales.Commands;
-using CGVStockApp.Application.Features.Sales.DTOs;
-using CGVStockApp.Domain.Entities;
-using CGVStockApp.Domain.Enums;
-using CGVStockApp.Infrastructure.Persistence.Context;
-
-namespace CGVStockApp.Application.Features.Sales.Handlers
-{
-    public class CreateSaleCommandHandler 
-        : IRequestHandler<CreateSaleCommand, SaleResponse>
-    {
-        private readonly StockAppDbContext _context;
-        private readonly IMapper _mapper;
-        
-        public CreateSaleCommandHandler(
-            StockAppDbContext context,
-            IMapper mapper)
-        {
-            _context = context;
-            _mapper = mapper;
-        }
-        
-        public async Task<SaleResponse> Handle(
-            CreateSaleCommand request,
-            CancellationToken cancellationToken)
-        {
-            // Validar usuario existe
-            var user = await _context.Users
-                .FindAsync(new object[] { request.UserId }, cancellationToken: cancellationToken);
-            
-            if (user == null)
-                throw new KeyNotFoundException("El usuario no existe");
-            
-            // Crear venta
-            var sale = new Sale
-            {
-                UserId = request.UserId,
-                CustomerType = request.CustomerType,
-                PaymentMethod = request.PaymentMethod
-            };
-            
-            // Procesar detalles y validar stock
-            foreach (var detail in request.Details)
-            {
-                var product = await _context.Products
-                    .FindAsync(new object[] { detail.ProductId }, cancellationToken: cancellationToken);
-                
-                if (product == null)
-                    throw new KeyNotFoundException($"Producto {detail.ProductId} no existe");
-                
-                // Validar stock
-                if (product.AvailableStock < detail.Quantity)
-                    throw new InvalidOperationException(
-                        $"Stock insuficiente para {product.Name}. " +
-                        $"Disponible: {product.AvailableStock}, solicitado: {detail.Quantity}");
-                
-                // Crear detalle
-                var appliedPrice = sale.GetAppliedPrice(product);
-                
-                var saleDetail = new SaleDetail
-                {
-                    ProductId = product.Id,
-                    Quantity = detail.Quantity,
-                    UnitPrice = appliedPrice,
-                    Subtotal = appliedPrice * detail.Quantity
-                };
-                
-                sale.Details.Add(saleDetail);
-                
-                // Descontar stock (lógica de dominio)
-                product.DecreaseStock(detail.Quantity);
-                
-                // Registrar movimiento de stock
-                var movement = new StockMovement
-                {
-                    ProductId = product.Id,
-                    Type = StockMovementType.Sale,
-                    Quantity = -detail.Quantity,
-                    Reason = $"Venta #{sale.Id}"
-                };
-                
-                _context.StockMovements.Add(movement);
-            }
-            
-            // Calcular total
-            sale.CalculateTotal();
-            
-            // Registrar en libro diario (Contabilidad)
-            var accountMovement = new AccountingMovement
-            {
-                MovementDate = sale.SaleDate,
-                Type = AccountingMovementType.Sale,
-                Description = $"Venta #{sale.Id}",
-                Amount = sale.Total,
-                IsIncome = true,
-                SaleId = sale.Id,
-                UserId = request.UserId
-            };
-            
-            _context.Sales.Add(sale);
-            _context.AccountingMovements.Add(accountMovement);
-            await _context.SaveChangesAsync(cancellationToken);
-            
-            return _mapper.Map<SaleResponse>(sale);
+            // Implementar GetProductByIdQuery
+            return Ok();
         }
     }
 }
@@ -1006,351 +1318,4 @@ namespace CGVStockApp.Application.Features.Sales.Handlers
 
 ---
 
-## 📊 EJEMPLO: DASHBOARD FEATURE (QUERIES COMPLEJAS)
-
-### 1. Application/Features/Dashboard/Queries/GetDailyDashboardQuery.cs
-
-```csharp
-using MediatR;
-using CGVStockApp.Application.Features.Dashboard.DTOs;
-
-namespace CGVStockApp.Application.Features.Dashboard.Queries
-{
-    public class GetDailyDashboardQuery : IRequest<DashboardResponse>
-    {
-        public DateTime Date { get; set; } = DateTime.Today;
-    }
-}
-```
-
-### 2. Application/Features/Dashboard/Handlers/GetDailyDashboardQueryHandler.cs
-
-```csharp
-using MediatR;
-using Microsoft.EntityFrameworkCore;
-using CGVStockApp.Application.Features.Dashboard.Queries;
-using CGVStockApp.Application.Features.Dashboard.DTOs;
-using CGVStockApp.Infrastructure.Persistence.Context;
-
-namespace CGVStockApp.Application.Features.Dashboard.QueryHandlers
-{
-    public class GetDailyDashboardQueryHandler 
-        : IRequestHandler<GetDailyDashboardQuery, DashboardResponse>
-    {
-        private readonly StockAppDbContext _context;
-        
-        public GetDailyDashboardQueryHandler(StockAppDbContext context)
-        {
-            _context = context;
-        }
-        
-        public async Task<DashboardResponse> Handle(
-            GetDailyDashboardQuery request,
-            CancellationToken cancellationToken)
-        {
-            var startOfDay = request.Date.Date;
-            var endOfDay = startOfDay.AddDays(1).AddTicks(-1);
-            
-            // Obtener movimientos del día
-            var movements = await _context.AccountingMovements
-                .Where(m => m.MovementDate >= startOfDay && m.MovementDate <= endOfDay)
-                .ToListAsync(cancellationToken);
-            
-            var incomes = movements
-                .Where(m => m.IsIncome)
-                .Sum(m => m.Amount);
-            
-            var expenses = movements
-                .Where(m => !m.IsIncome)
-                .Sum(m => m.Amount);
-            
-            var balance = incomes - expenses;
-            
-            return new DashboardResponse
-            {
-                Period = "Diario",
-                Date = request.Date,
-                TotalIncomes = incomes,
-                TotalExpenses = expenses,
-                Balance = balance,
-                Movements = movements
-                    .Select(m => new MovementDto
-                    {
-                        Date = m.MovementDate,
-                        Type = m.Type.ToString(),
-                        Description = m.Description,
-                        Amount = m.Amount,
-                        IsIncome = m.IsIncome
-                    })
-                    .ToList()
-            };
-        }
-    }
-}
-```
-
-### 3. Application/Features/Dashboard/DTOs/DashboardResponse.cs
-
-```csharp
-namespace CGVStockApp.Application.Features.Dashboard.DTOs
-{
-    public class DashboardResponse
-    {
-        public string Period { get; set; }
-        public DateTime Date { get; set; }
-        public decimal TotalIncomes { get; set; }
-        public decimal TotalExpenses { get; set; }
-        public decimal Balance { get; set; }
-        public List<MovementDto> Movements { get; set; }
-    }
-    
-    public class MovementDto
-    {
-        public DateTime Date { get; set; }
-        public string Type { get; set; }
-        public string Description { get; set; }
-        public decimal Amount { get; set; }
-        public bool IsIncome { get; set; }
-    }
-}
-```
-
----
-
-## ⚙️ CONFIGURACIÓN GLOBAL
-
-### 1. Application/DependencyInjection.cs
-
-```csharp
-using Microsoft.Extensions.DependencyInjection;
-using MediatR;
-using FluentValidation;
-using AutoMapper;
-using CGVStockApp.Application.Common.Behaviors;
-using CGVStockApp.Application.Features.Products.Mappings;
-
-namespace CGVStockApp.Application
-{
-    public static class DependencyInjection
-    {
-        public static IServiceCollection AddApplication(this IServiceCollection services)
-        {
-            // MediatR
-            services.AddMediatR(typeof(DependencyInjection).Assembly);
-            
-            // Pipeline Behaviors
-            services.AddTransient(typeof(IPipelineBehavior<,>), typeof(ValidationBehavior<,>));
-            services.AddTransient(typeof(IPipelineBehavior<,>), typeof(LoggingBehavior<,>));
-            
-            // FluentValidation
-            services.AddValidatorsFromAssembly(typeof(DependencyInjection).Assembly);
-            
-            // AutoMapper
-            services.AddAutoMapper(typeof(ProductMappingProfile).Assembly);
-            
-            return services;
-        }
-    }
-}
-```
-
-### 2. Infrastructure/DependencyInjection.cs
-
-```csharp
-using Microsoft.Extensions.Configuration;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.EntityFrameworkCore;
-using CGVStockApp.Infrastructure.Persistence.Context;
-using CGVStockApp.Infrastructure.Repositories;
-
-namespace CGVStockApp.Infrastructure
-{
-    public static class DependencyInjection
-    {
-        public static IServiceCollection AddInfrastructure(
-            this IServiceCollection services,
-            IConfiguration configuration)
-        {
-            // DbContext
-            var connectionString = configuration.GetConnectionString("DefaultConnection");
-            services.AddDbContext<StockAppDbContext>(options =>
-                options.UseNpgsql(connectionString));
-            
-            // Repositories
-            services.AddScoped<IUnitOfWork, UnitOfWork>();
-            services.AddScoped<IProductRepository, ProductRepository>();
-            services.AddScoped<ISalesRepository, SalesRepository>();
-            
-            // Services
-            services.AddScoped<JwtTokenService>();
-            services.AddScoped<PasswordHashService>();
-            services.AddScoped<PdfGenerationService>();
-            
-            return services;
-        }
-    }
-}
-```
-
-### 3. Api/Program.cs
-
-```csharp
-using CGVStockApp.Application;
-using CGVStockApp.Infrastructure;
-using Microsoft.AspNetCore.Authentication.JwtBearer;
-using Microsoft.IdentityModel.Tokens;
-using System.Text;
-
-var builder = WebApplicationBuilder.CreateBuilder(args);
-
-// Add services
-builder.Services.AddApplication();
-builder.Services.AddInfrastructure(builder.Configuration);
-builder.Services.AddControllers();
-builder.Services.AddEndpointsApiExplorer();
-builder.Services.AddSwaggerGen();
-
-// JWT Authentication
-var jwtSettings = builder.Configuration.GetSection("JwtSettings");
-var secretKey = jwtSettings["SecretKey"];
-
-builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
-    .AddJwtBearer(options =>
-    {
-        options.TokenValidationParameters = new TokenValidationParameters
-        {
-            ValidateIssuerSigningKey = true,
-            IssuerSigningKey = new SymmetricSecurityKey(Encoding.ASCII.GetBytes(secretKey)),
-            ValidateIssuer = true,
-            ValidIssuer = "CGVStockApp",
-            ValidateAudience = true,
-            ValidAudience = "CGVStockAppClient",
-            ValidateLifetime = true
-        };
-    });
-
-builder.Services.AddAuthorization();
-
-// CORS
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowReactApp", builder =>
-    {
-        builder.WithOrigins("http://localhost:3000")
-               .AllowAnyMethod()
-               .AllowAnyHeader();
-    });
-});
-
-var app = builder.Build();
-
-if (app.Environment.IsDevelopment())
-{
-    app.UseSwagger();
-    app.UseSwaggerUI();
-}
-
-app.UseHttpsRedirection();
-app.UseCors("AllowReactApp");
-app.UseAuthentication();
-app.UseAuthorization();
-app.MapControllers();
-
-app.Run();
-```
-
-### 4. Application/Common/Behaviors/ValidationBehavior.cs
-
-```csharp
-using MediatR;
-using FluentValidation;
-
-namespace CGVStockApp.Application.Common.Behaviors
-{
-    public class ValidationBehavior<TRequest, TResponse> 
-        : IPipelineBehavior<TRequest, TResponse>
-        where TRequest : IRequest<TResponse>
-    {
-        private readonly IEnumerable<IValidator<TRequest>> _validators;
-        
-        public ValidationBehavior(IEnumerable<IValidator<TRequest>> validators)
-        {
-            _validators = validators;
-        }
-        
-        public async Task<TResponse> Handle(
-            TRequest request,
-            RequestHandlerDelegate<TResponse> next,
-            CancellationToken cancellationToken)
-        {
-            if (!_validators.Any())
-                return await next();
-            
-            var context = new ValidationContext<TRequest>(request);
-            var failures = new List<FluentValidation.Results.ValidationFailure>();
-            
-            foreach (var validator in _validators)
-            {
-                var result = await validator.ValidateAsync(context, cancellationToken);
-                failures.AddRange(result.Errors);
-            }
-            
-            if (failures.Any())
-                throw new ValidationException("Validation failed", failures);
-            
-            return await next();
-        }
-    }
-}
-```
-
----
-
-## 🧪 TESTING
-
-### Unit Test Ejemplo
-
-```csharp
-using Xunit;
-using Moq;
-using AutoMapper;
-using CGVStockApp.Application.Features.Products.Commands;
-using CGVStockApp.Application.Features.Products.Handlers;
-using CGVStockApp.Domain.Entities;
-using CGVStockApp.Infrastructure.Persistence.Context;
-
-namespace CGVStockApp.Tests.Application.Features.Products
-{
-    public class CreateProductCommandHandlerTests
-    {
-        [Fact]
-        public async Task Handle_WithValidRequest_ReturnsProductResponse()
-        {
-            // Arrange
-            var command = new CreateProductCommand
-            {
-                Name = "Test Product",
-                PublicPrice = 100,
-                WholesalePrice = 80,
-                InitialStock = 10,
-                AlertStock = 2
-            };
-            
-            var mockContext = new Mock<StockAppDbContext>();
-            var mockMapper = new Mock<IMapper>();
-            var handler = new CreateProductCommandHandler(mockContext.Object, mockMapper.Object);
-            
-            // Act
-            // var result = await handler.Handle(command, CancellationToken.None);
-            
-            // Assert
-            // Assert.NotNull(result);
-            // Assert.Equal("Test Product", result.Name);
-        }
-    }
-}
-```
-
----
-
-**Documento siguiente:** Ejemplos de Frontend React + integración con CQRS API
+**Próximo documento:** Roadmap revisado v2.0 (Días 1-47)
