@@ -1,6 +1,6 @@
 namespace CGVStockApp.Domain.Enums;
 
-public enum AccoutingMovementType
+public enum AccountingMovementType
 {
     Sale = 1,
     Expense = 2,

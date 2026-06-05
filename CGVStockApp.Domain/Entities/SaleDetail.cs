@@ -1,4 +1,4 @@
-using CGVStock.Domain.Entities;
+using CGVStockApp.Domain.Entities;
 using CGVStockApp.Domain.Common;
 
 namespace CGVStockApp.Domain.Entities;

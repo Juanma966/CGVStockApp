@@ -2,7 +2,7 @@ using CGVStockApp.Domain.Common;
 using CGVStockApp.Domain.Entities;
 using CGVStockApp.Domain.Enums;
 
-namespace CGVStock.Domain.Entities;
+namespace CGVStockApp.Domain.Entities;
 
 public class Sale : AuditableEntity
 {
